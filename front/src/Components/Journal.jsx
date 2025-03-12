@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import Stock from "./Stock";
+import "./Global.css";
 
 function Journal() {
   const navigate = useNavigate();
@@ -8,71 +8,160 @@ function Journal() {
   const [typebon, setTypebon] = useState("Bon Entrée");
   const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
   const [tiers, setTiers] = useState("");
-  const [editId, setEditId] = useState(null); // Pour suivre l'ID du bon en cours d'édition
+  const [editId, setEditId] = useState(null);
+  const [username, setUsername] = useState(""); // ✅ État pour le nom d'utilisateur
 
-  // 🔹 Récupérer les bons depuis le backend
+  // ✅ Fonction pour récupérer le token
+  const getToken = () => localStorage.getItem("auth-token");
+
+  // ✅ Récupérer le nom d'utilisateur
   useEffect(() => {
-    fetch("http://localhost:5000/bons")
-      .then(res => res.json())
-      .then(data => setBons(data))
-      .catch(err => console.error("Erreur :", err));
+    const storedUsername = localStorage.getItem("username");
+    if (storedUsername) {
+      setUsername(storedUsername);
+    }
   }, []);
 
-  // 🔹 Ajouter ou modifier un bon dans MongoDB
-  const handleSubmit = () => {
-    const newBon = { typebon, date, tiers };
+  // ✅ Fonction de déconnexion
+  const handleLogout = () => {
+    localStorage.removeItem("auth-token");
+    localStorage.removeItem("username");
+    navigate("/");
+  };
 
-    if (editId) {
-      // 🔹 Mode modification
-      fetch(`http://localhost:5000/bons/${editId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(newBon),
-      })
-        .then(res => res.json())
-        .then(updatedBon => {
-          setBons(bons.map(bon => (bon.id === editId ? updatedBon : bon)));
-          setEditId(null);
-        })
-        .catch(err => console.error("Erreur :", err));
-    } else {
-      // 🔹 Mode ajout
-      fetch("http://localhost:5000/bons", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(newBon),
-      })
-        .then(res => res.json())
-        .then(data => setBons([...bons, data]))
-        .catch(err => console.error("Erreur :", err));
+  // ✅ Vérifier le token et récupérer les bons
+  useEffect(() => {
+    const fetchBons = async () => {
+      const token = getToken();
+      if (!token) {
+        console.error("⚠️ Aucun token trouvé. Redirection vers login.");
+        navigate("/");
+        return;
+      }
+
+      try {
+        const response = await fetch("http://localhost:5000/bons", {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+        });
+
+        if (response.status === 401) {
+          console.error("⚠️ Token invalide ou expiré. Redirection vers login.");
+          localStorage.removeItem("auth-token");
+          navigate("/");
+          return;
+        }
+
+        if (!response.ok) throw new Error("❌ Erreur de récupération des bons");
+
+        const data = await response.json();
+        setBons(data);
+      } catch (error) {
+        console.error("Erreur :", error);
+      }
+    };
+
+    fetchBons();
+  }, [navigate]);
+
+  // ✅ Ajouter ou modifier un bon
+  const handleSubmit = async () => {
+    const token = getToken();
+    if (!token) {
+      console.error("⚠️ Aucun token trouvé. Redirection vers login.");
+      navigate("/");
+      return;
     }
 
-    // Réinitialiser le formulaire
+    const newBon = { typebon, date, tiers };
+    const url = editId
+      ? `http://localhost:5000/bons/${editId}`
+      : "http://localhost:5000/bons";
+    const method = editId ? "PUT" : "POST";
+
+    try {
+      const response = await fetch(url, {
+        method,
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(newBon),
+      });
+
+      if (response.status === 401) {
+        localStorage.removeItem("auth-token");
+        navigate("/");
+        return;
+      }
+
+      const data = await response.json();
+      if (editId) {
+        setBons(bons.map(bon => (bon.id === editId ? data : bon)));
+        setEditId(null);
+      } else {
+        setBons([...bons, data]);
+      }
+    } catch (error) {
+      console.error("Erreur :", error);
+    }
+
     setTypebon("Bon Entrée");
     setDate(new Date().toISOString().split("T")[0]);
     setTiers("");
   };
 
-  // 🔹 Charger un bon existant pour modification
-  const editBon = bon => {
-    setEditId(bon.id);
-    setTypebon(bon.typebon);
-    setDate(bon.date);
-    setTiers(bon.tiers);
+  // ✅ Supprimer un bon
+  const deleteBon = async bonId => {
+    const token = getToken();
+    if (!token) {
+      console.error("⚠️ Aucun token trouvé. Redirection vers login.");
+      navigate("/");
+      return;
+    }
+
+    try {
+      const response = await fetch(`http://localhost:5000/bons/${bonId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (response.status === 401) {
+        localStorage.removeItem("auth-token");
+        navigate("/");
+        return;
+      }
+
+      setBons(bons.filter(bon => bon.id !== bonId));
+    } catch (error) {
+      console.error("Erreur :", error);
+    }
   };
 
-  // 🔹 Supprimer un bon
-  const deleteBon = bonId => {
-    fetch(`http://localhost:5000/bons/${bonId}`, { method: "DELETE" })
-      .then(() => setBons(bons.filter(bon => bon.id !== bonId)))
-      .catch(err => console.error("Erreur :", err));
+  // ✅ Fonction pour aller vers l'ajout de produit (Inventaire)
+  const goToInventory = bon => {
+    navigate(
+      `/inventory?id=${bon.id}&typebon=${bon.typebon}&date=${bon.date}&tiers=${bon.tiers}`
+    );
   };
 
   return (
     <div className='container-fluid bg-2 text-center'>
-      <h1>Journal Des Bons :</h1>
+      {/* ✅ En-tête avec nom et bouton de déconnexion */}
+      <div className='d-flex justify-content-between align-items-center p-3 bg-light'>
+        <h2 className='m-0'>📜 Journal des Bons</h2>
+        <div className='d-flex align-items-center'>
+          <span className='me-3'>👤 {username}</span>
+          <button className='btn btn-danger' onClick={handleLogout}>
+            Déconnexion
+          </button>
+        </div>
+      </div>
 
-      {/* 🔹 Formulaire */}
+      {/* ✅ Formulaire pour ajouter/modifier un bon */}
       <div className='row mb-3'>
         <div className='col-md-3'>
           <label>Type de Bon :</label>
@@ -101,7 +190,6 @@ function Journal() {
           <input
             type='text'
             className='form-control'
-            placeholder='Nom du tiers'
             value={tiers}
             onChange={e => setTiers(e.target.value)}
           />
@@ -114,7 +202,7 @@ function Journal() {
         </div>
       </div>
 
-      {/* 🔹 Liste des bons */}
+      {/* ✅ Liste des Bons */}
       <h3 align='left'>Liste des Bons</h3>
       <table className='table table-bordered'>
         <thead>
@@ -133,20 +221,16 @@ function Journal() {
               <td>{bon.typebon}</td>
               <td>{bon.date}</td>
               <td>{bon.tiers}</td>
-              <td>
+              <td className='d-flex justify-content-center gap-2'>
                 <button
-                  className='btn btn-info me-2'
-                  onClick={() =>
-                    navigate(
-                      `/inventory?id=${bon.id}&typebon=${bon.typebon}&date=${bon.date}&tiers=${bon.tiers}`
-                    )
-                  }
+                  className='btn btn-info'
+                  onClick={() => goToInventory(bon)}
                 >
                   Ajouter Produit
                 </button>
                 <button
-                  className='btn btn-warning me-2'
-                  onClick={() => editBon(bon)}
+                  className='btn btn-warning'
+                  onClick={() => setEditId(bon.id)}
                 >
                   Modifier
                 </button>
