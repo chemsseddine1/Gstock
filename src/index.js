@@ -3,10 +3,11 @@ const path = require("path");
 const bcrypt = require("bcrypt");
 const mongoose = require("mongoose");
 const cors = require("cors");
-//const User = require("./models/User"); // Import du modèle User
+const jwt = require("jsonwebtoken");
 const { Bon, getNextSequence, User } = require("./config");
 
 const app = express();
+const SECRET_KEY = "secret123"; // ⚠️ À remplacer par une variable d'environnement en production
 
 // ✅ Middleware
 app.use(express.json());
@@ -17,56 +18,96 @@ app.set("views", path.join(__dirname, "../views"));
 app.use(express.static("public"));
 
 // ✅ Connexion à MongoDB
-mongoose
-  .connect("mongodb://localhost:27017/Gstock", {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-  })
-  .then(() => console.log("✅ MongoDB connecté"))
-  .catch(err => console.error("❌ Erreur de connexion MongoDB :", err));
 
-// ✅ Routes de l'authentification
-app.get("/", (req, res) => res.render("login"));
-app.get("/signup", (req, res) => res.render("signup"));
+mongoose.connect("mongodb://localhost:27017/Gstock", {
+  useNewUrlParser: true,
+  useUnifiedTopology: true,
+});
 
+// ✅ Routes d'authentification
 app.post("/signup", async (req, res) => {
   try {
-    const existingUser = await User.findOne({ name: req.body.username });
-    if (existingUser) return res.status(400).send("Utilisateur déjà existant");
+    console.log("🟢 Tentative d'inscription :", req.body);
+
+    const existingUser = await User.findOne({ name: req.body.name });
+    if (existingUser) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Utilisateur déjà existant" });
+    }
 
     const hashedPassword = await bcrypt.hash(req.body.password, 10);
-    const userdata = await User.create({
-      name: req.body.username,
+    const newUser = await User.create({
+      name: req.body.name,
       password: hashedPassword,
     });
 
-    console.log("✅ Utilisateur enregistré :", userdata);
-    res.redirect("/");
+    console.log("✅ Utilisateur enregistré :", newUser);
+    res.json({ success: true, message: "Inscription réussie", user: newUser });
   } catch (error) {
     console.error("❌ Erreur lors de l'inscription :", error);
-    res.status(500).send("Erreur lors de l'inscription");
+    res
+      .status(500)
+      .json({ success: false, message: "Erreur lors de l'inscription", error });
   }
 });
 
 app.post("/login", async (req, res) => {
   try {
-    const user = await User.findOne({ name: req.body.username });
-    if (!user) return res.status(400).send("Utilisateur non trouvé");
+    console.log("🟢 Tentative de connexion :", req.body);
+
+    const user = await User.findOne({ name: req.body.name });
+    if (!user) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Utilisateur non trouvé" });
+    }
 
     const isMatch = await bcrypt.compare(req.body.password, user.password);
-    if (isMatch) {
-      res.render("home");
-    } else {
-      res.status(400).send("Mot de passe incorrect");
+    if (!isMatch) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Mot de passe incorrect" });
     }
+
+    // ✅ Générer un token JWT
+    const token = jwt.sign({ userId: user._id }, SECRET_KEY, {
+      expiresIn: "1h",
+    });
+
+    res.json({
+      success: true,
+      message: "Connexion réussie",
+      token,
+      name: user.name,
+    });
   } catch (error) {
     console.error("❌ Erreur lors de la connexion :", error);
-    res.status(500).send("Erreur de connexion");
+    res
+      .status(500)
+      .json({ success: false, message: "Erreur de connexion", error });
   }
 });
 
-// ✅ API REST pour la gestion des bons
-app.post("/bons", async (req, res) => {
+// ✅ Middleware d'authentification avec JWT
+const authMiddleware = (req, res, next) => {
+  const token = req.headers.authorization?.split(" ")[1];
+  if (!token)
+    return res
+      .status(401)
+      .json({ success: false, message: "Accès non autorisé" });
+
+  try {
+    const decoded = jwt.verify(token, SECRET_KEY);
+    req.user = decoded;
+    next();
+  } catch (error) {
+    return res.status(401).json({ success: false, message: "Token invalide" });
+  }
+};
+
+// ✅ API REST pour la gestion des bons (protégé par JWT)
+app.post("/bons", authMiddleware, async (req, res) => {
   try {
     const { typebon, date, tiers } = req.body;
     const newId = await getNextSequence("bonId");
@@ -86,7 +127,7 @@ app.post("/bons", async (req, res) => {
   }
 });
 
-app.get("/bons", async (req, res) => {
+app.get("/bons", authMiddleware, async (req, res) => {
   try {
     const bons = await Bon.find();
     res.json(bons);
@@ -97,7 +138,7 @@ app.get("/bons", async (req, res) => {
   }
 });
 
-app.get("/bons/:id", async (req, res) => {
+app.get("/bons/:id", authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
     const bon = await Bon.findOne({ id: Number(id) });
@@ -108,7 +149,7 @@ app.get("/bons/:id", async (req, res) => {
   }
 });
 
-app.post("/bons/:id/produits", async (req, res) => {
+app.post("/bons/:id/produits", authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
     const { name, price, qty } = req.body;
@@ -129,7 +170,7 @@ app.post("/bons/:id/produits", async (req, res) => {
   }
 });
 
-app.put("/bons/:id", async (req, res) => {
+app.put("/bons/:id", authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
     const { typebon, date, tiers } = req.body;
@@ -144,7 +185,7 @@ app.put("/bons/:id", async (req, res) => {
   }
 });
 
-app.delete("/bons/:id", async (req, res) => {
+app.delete("/bons/:id", authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
     await Bon.findOneAndDelete({ id: Number(id) });
