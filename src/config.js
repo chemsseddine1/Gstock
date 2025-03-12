@@ -49,6 +49,7 @@ async function getNextSequence(name) {
 // ✅ Schéma et modèle de l'utilisateur
 const userSchema = new mongoose.Schema({
   name: { type: String, required: true, unique: true },
+
   password: { type: String, required: true },
 });
 
