@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 
 function Inventory() {
   const location = useLocation();
+  const navigate = useNavigate();
   const queryParams = new URLSearchParams(location.search);
 
   const id = queryParams.get("id");
@@ -10,7 +11,7 @@ function Inventory() {
   const date = queryParams.get("date");
   const tiers = queryParams.get("tiers");
 
-  const [idproduit, setIdproduit] = useState(id || ""); // Correction
+  const [idproduit, setIdproduit] = useState(id || "");
   const [price, setPrice] = useState(0);
   const [qty, setQty] = useState(0);
   const [sum, setSum] = useState(0);
@@ -18,102 +19,105 @@ function Inventory() {
   const [name, setName] = useState("");
   const [total, setTotal] = useState(0);
 
-  // Effet pour récupérer la liste des produits du bon
-  useEffect(() => {
-    const fetchProducts = async () => {
-      try {
-        const res = await fetch(`http://localhost:5000/bons/${id}`);
-        if (!res.ok) throw new Error("Erreur lors de la récupération du bon");
-
-        const data = await res.json();
-        setUsers(data.produits || []); // Met à jour la liste des produits
-      } catch (err) {
-        console.error("Erreur :", err);
-      }
-    };
-
-    if (id) {
-      fetchProducts();
+  const fetchProducts = async () => {
+    const token = localStorage.getItem("auth-token");
+    if (!token) {
+      console.error("⚠️ Aucun token trouvé. Redirection vers login.");
+      navigate("/");
+      return;
     }
-  }, [id]);
 
-  useEffect(() => {
-    const newTotal = users.reduce((acc, product) => acc + product.sum, 0);
-    setTotal(newTotal);
-  }, [users]);
+    try {
+      const res = await fetch(`http://localhost:5000/bons/${id}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error("Erreur lors de la récupération du bon");
 
-  // Mettre à jour idproduit si id change
-  useEffect(() => {
-    setIdproduit(id || "");
-  }, [id]);
-
-  const calculation = () => {
-    const newUser = { name, idproduit, qty, price, sum };
-    setUsers(prevUsers => [...prevUsers, newUser]);
-
-    // Mise à jour du total
-    setTotal(prevTotal => prevTotal + sum);
-
-    // Clear inputs
-    setName("");
-    setQty(0);
-    setPrice(0);
-    setSum(0);
+      const data = await res.json();
+      console.log("📦 Produits récupérés :", data.produits);
+      setUsers(data.produits || []);
+    } catch (err) {
+      console.error("❌ Erreur :", err);
+    }
   };
 
-  const addProductToBon = async () => {
-    const newProduct = { name, price, qty, sum };
+  useEffect(() => {
+    if (id) fetchProducts();
+  }, [id, navigate]);
 
+  useEffect(() => {
+    const newTotal = users.reduce(
+      (acc, product) => acc + (product.sum || 0),
+      0
+    );
+    setTotal(newTotal);
+    console.log("💰 Total mis à jour :", newTotal);
+  }, [users]);
+
+  const addProductToBon = async () => {
+    const token = localStorage.getItem("auth-token");
+    if (!token) {
+      console.error("⚠️ Aucun token trouvé. Redirection vers login.");
+      navigate("/login");
+      return;
+    }
+
+    const newProduct = { idproduit, name, price, qty, sum };
     try {
       const res = await fetch(`http://localhost:5000/bons/${id}/produits`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
         body: JSON.stringify(newProduct),
       });
 
       if (!res.ok) throw new Error("Erreur lors de l'ajout du produit");
 
       const data = await res.json();
-      setUsers(prevUsers => [...prevUsers, data]);
-      window.location.reload();
-      // Met à jour l'affichage
+      console.log("✅ Produit ajouté :", data);
 
-      // Reset des champs
+      // Rafraîchir la liste après l'ajout
+      fetchProducts();
+
+      // Réinitialisation des champs après l'ajout
       setName("");
       setQty(0);
       setPrice(0);
       setSum(0);
     } catch (err) {
-      console.error("Erreur :", err);
+      console.error("❌ Erreur :", err);
     }
   };
 
-  const handlePricechange = e => {
+  const handlePriceChange = e => {
     const newPrice = parseFloat(e.target.value) || 0;
     setPrice(newPrice);
     setSum(newPrice * qty);
   };
 
-  const handleQuantitychange = e => {
+  const handleQuantityChange = e => {
     let newQuantity = parseInt(e.target.value) || 0;
-
-    // Si c'est un Bon Sortie, multiplier par -1
-    if (typebon === "Bon Sortie") {
-      newQuantity = -Math.abs(newQuantity);
-    }
-
+    if (typebon === "Bon Sortie") newQuantity = -Math.abs(newQuantity);
     setQty(newQuantity);
     setSum(price * newQuantity);
   };
 
-  function refreshPage() {
-    window.location.reload();
-  }
+  const handleConsultStock = () => {
+    const token = localStorage.getItem("auth-token");
+    if (!token) {
+      console.error("⚠️ Aucun token trouvé. Redirection vers login.");
+      navigate("/login");
+      return;
+    }
+
+    navigate("/stock"); // Redirection vers la page stock
+  };
 
   return (
     <div className='container-fluid bg-2 text-center'>
-      <h1>Detail De Bon </h1>
-
+      <h1>📦 Détail du Bon</h1>
       <p>
         <strong>Id Bon:</strong> {id}
       </p>
@@ -126,19 +130,18 @@ function Inventory() {
       <p>
         <strong>Tiers:</strong> {tiers}
       </p>
-
       <br />
       <div className='row'>
         <div className='col-sm-8'>
-          <h2 align='left'>Ajouter Les Produits</h2>
+          <h2 align='left'>Ajouter des Produits</h2>
           <table className='table table-bordered'>
             <thead>
               <tr>
                 <th>Product ID</th>
-                <th>Product Name</th>
-                <th>Price</th>
-                <th>Qty</th>
-                <th>Amount</th>
+                <th>Nom</th>
+                <th>Prix</th>
+                <th>Quantité</th>
+                <th>Total</th>
                 <th>Option</th>
               </tr>
             </thead>
@@ -156,7 +159,7 @@ function Inventory() {
                   <input
                     type='text'
                     className='form-control'
-                    placeholder='Item Name'
+                    placeholder='Nom du produit'
                     value={name}
                     onChange={e => setName(e.target.value)}
                   />
@@ -165,18 +168,18 @@ function Inventory() {
                   <input
                     type='number'
                     className='form-control'
-                    placeholder='Enter Price'
+                    placeholder='Prix'
                     value={price}
-                    onChange={handlePricechange}
+                    onChange={handlePriceChange}
                   />
                 </td>
                 <td>
                   <input
                     type='number'
                     className='form-control'
-                    placeholder='Enter Qty'
+                    placeholder='Quantité'
                     value={qty}
-                    onChange={handleQuantitychange}
+                    onChange={handleQuantityChange}
                   />
                 </td>
                 <td>
@@ -189,30 +192,33 @@ function Inventory() {
                   />
                 </td>
                 <td>
+                  <button className='btn btn-success' onClick={addProductToBon}>
+                    Ajouter
+                  </button>
+                </td>
+                <td>
+                  {" "}
                   <button
                     className='btn btn-success'
-                    type='button'
-                    onClick={addProductToBon}
+                    onClick={handleConsultStock}
                   >
-                    Add
+                    Consulter Stock
                   </button>
                 </td>
               </tr>
             </tbody>
           </table>
-
-          <h3 align='left'>Products</h3>
+          <h3 align='left'>Produits</h3>
           <table className='table table-bordered'>
             <thead>
               <tr>
                 <th>Product ID</th>
-                <th>Item Name</th>
-                <th>Price</th>
-                <th>Qty</th>
-                <th>Amount</th>
+                <th>Nom</th>
+                <th>Prix</th>
+                <th>Quantité</th>
+                <th>Total</th>
               </tr>
             </thead>
-
             <tbody>
               {users.map((row, index) => (
                 <tr key={index}>
@@ -226,19 +232,15 @@ function Inventory() {
             </tbody>
           </table>
         </div>
-
         <div className='col-sm-4'>
-          <div className='form-group' align='left'>
-            <h3>Total</h3>
-            <input
-              type='text'
-              className='form-control'
-              placeholder='Enter total'
-              value={total}
-              disabled
-            />
-            <br />
-          </div>
+          <h3>Total</h3>
+          <input
+            type='text'
+            className='form-control'
+            placeholder='Total'
+            value={total}
+            disabled
+          />
         </div>
       </div>
     </div>
